@@ -79,8 +79,7 @@ jobs:
           GOARM: ${{ matrix.goarm }}
           CGO_ENABLED: 0
         run: |
-          go build -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" \
-  -o ${{ matrix.output }} ./cmd/dumper
+          go build -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o ${{ matrix.output }} ./cmd/dumper
 
       - name: Generate SHA256
         run: |

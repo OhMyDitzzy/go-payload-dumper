@@ -1,0 +1,190 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Linux
+          - os: linux
+            arch: amd64
+            output: go-payload-dumper-linux-amd64
+          - os: linux
+            arch: arm64
+            output: go-payload-dumper-linux-arm64
+          - os: linux
+            arch: arm
+            goarm: 7
+            output: go-payload-dumper-linux-armv7
+          
+          # macOS
+          - os: darwin
+            arch: amd64
+            output: go-payload-dumper-darwin-amd64
+          - os: darwin
+            arch: arm64
+            output: go-payload-dumper-darwin-arm64
+          
+          # Windows
+          - os: windows
+            arch: amd64
+            output: go-payload-dumper-windows-amd64.exe
+          - os: windows
+            arch: arm64
+            output: go-payload-dumper-windows-arm64.exe
+          
+          # Android (Termux)
+          - os: android
+            arch: arm64
+            output: go-payload-dumper-android-arm64
+          - os: android
+            arch: arm
+            goarm: 7
+            output: go-payload-dumper-android-armv7
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install Protocol Buffers Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Install protoc-gen-go
+        run: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+
+      - name: Generate Protocol Buffers
+        run: protoc --go_out=. --go_opt=paths=source_relative protos/update_metadata.proto
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.os == 'android' && 'linux' || matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: 0
+        run: |
+          if [ "${{ matrix.os }}" = "android" ]; then
+            # For Android/Termux builds
+            CC=arm-linux-gnueabihf-gcc go build -ldflags="-s -w -extldflags '-static'" -tags 'osusergo netgo static_build' -o ${{ matrix.output }} ./cmd/dumper
+          else
+            go build -ldflags="-s -w" -o ${{ matrix.output }} ./cmd/dumper
+          fi
+
+      - name: Compress binary (Unix)
+        if: matrix.os != 'windows'
+        run: |
+          tar -czf ${{ matrix.output }}.tar.gz ${{ matrix.output }}
+          sha256sum ${{ matrix.output }}.tar.gz > ${{ matrix.output }}.tar.gz.sha256
+
+      - name: Compress binary (Windows)
+        if: matrix.os == 'windows'
+        run: |
+          zip ${{ matrix.output }}.zip ${{ matrix.output }}
+          sha256sum ${{ matrix.output }}.zip > ${{ matrix.output }}.zip.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output }}
+          path: |
+            ${{ matrix.output }}*
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
+            artifacts/**/*.sha256
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install Protocol Buffers Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Install protoc-gen-go
+        run: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+
+      - name: Generate Protocol Buffers
+        run: protoc --go_out=. --go_opt=paths=source_relative protos/update_metadata.proto
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run go fmt
+        run: |
+          if [ -n "$(gofmt -s -l .)" ]; then
+            echo "Go code is not formatted:"
+            gofmt -s -d .
+            exit 1
+          fi
+
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.txt
+          flags: unittests
+          name: codecov-umbrella

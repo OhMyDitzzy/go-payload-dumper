@@ -88,7 +88,7 @@ No need to download large OTA files manually. Point directly to the URL:
 The tool will download it, detect if it's a ZIP, extract payload.bin, and dump all partitions. Perfect for automated workflows.
 
 ## Troubleshooting
-###"Invalid magic header" error
+### "Invalid magic header" error
 The file you're trying to extract isn't a valid OTA payload. Make sure:
 - You're pointing to the correct file (payload.bin or a ZIP containing it)
 - The file isn't corrupted (check file size, try re-downloading)

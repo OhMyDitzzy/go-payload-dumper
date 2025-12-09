@@ -2,14 +2,6 @@
 
 This guide will help you install and use Go Payload Dumper on Android via Termux.
 
-## Quick Install
-
-Run this one-liner in Termux:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/OhMyDitzzy/go-payload-dumper/main/termux-install.sh | bash
-```
-
 # Manual Installation
 ## Step 1: Install Dependencies
 ```bash
